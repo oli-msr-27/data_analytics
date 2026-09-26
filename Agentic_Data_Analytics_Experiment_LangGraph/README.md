@@ -1,201 +1,151 @@
-# Agentic Framework Demo: Data Analytics Process Model (LangGraph)
+# Autonomous multi-agent data analytics (LangGraph + OpenAI + live web UI)
 
-An experiment from the **Data Analytics** module at ZHAW: a
-[LangGraph](https://langchain-ai.github.io/langgraph/)-based multi-agent
-system wrapped in a live web app, used to explore how multiple LLM-based
-agents can collaborate on a real data task. **Non-commercial / educational
-use only.**
-
-Three OpenAI-backed agents &mdash; a **Product Manager**, a **Data Analyst**,
-and a **Data Engineer**, peers with no hierarchy between them &mdash; work
-through the first steps of the course's Data Analytics Process Model:
-agreeing on a business objective, defining what data is needed, actually
-collecting it (real web scraping / open-data API calls), and preparing and
-storing it (real cleaning, a real SQLite database, a real SQL query). No
-analysis or modeling happens yet &mdash; that's a later part of the process
-model this demo doesn't cover.
-
-All agents share one growing conversation transcript, decide for themselves
-whether and when to use their tools, and every number they discuss comes
-from a real request, computation, or query &mdash; nothing is faked or
-pre-scripted. A run ends automatically once the steps are done, or any time
-via the **Stop** button.
-
-## How it works
-
-```
-main.py                  start the server: python main.py
-app/
-  config.py              run length, turn budgets, file paths, fallback dataset
-  server.py              FastAPI routes + the Server-Sent-Events stream
-  demo_run.py            DemoRun: steps 1-4 in order, stop/timeout handling
-agents/
-  prompts.py             every persona, phase goal and system message
-  personas.py            builds the six agents (model + bound tools)
-  graph.py               LangGraph StateGraph: one phase's turn-taking
-tools/
-  opendata.py            opendata.swiss search / download / discard
-  preparation.py         preview, profile, clean, SQLite store, SQL query, sketch
-  scraper.py             check, save and run agent-written scrapers
-  validation.py          "is this really listing-level data?" checks
-  schemas.py             every tool schema the models see
-  run_tools.py           RunTools: per-run state + tool dispatch
-sandbox/scraper_kit.py   agent-written scrapers' only way to the web
-reporting/transcript.py  saves each run as Markdown + HTML
-static/                  plain HTML/CSS/JS frontend (no build step)
-tests/                   offline tests for the scraper tools
-```
-
-- **`app/`** &mdash; the web layer. `config.py` holds every setting a run
-  depends on (`DEMO_LENGTH_MINUTES` is the one knob for pacing).
-  `demo_run.py`'s `DemoRun` runs the four steps in order, streaming each
-  phase's compiled graph; `server.py` sends that to the browser via
-  Server-Sent Events.
-- **`agents/`** &mdash; `graph.py` is the LangGraph orchestration: a small
-  compiled `StateGraph` that drives one agent's turn (speak &rarr;
-  optionally call a real tool &rarr; react to the real result &rarr; record
-  the turn), looped via a conditional edge until the phase's agents reach
-  consensus (their status tag) or a turn cap is hit. `personas.py` builds
-  the six agent variants (a no-tools and a tools-bound variant of the Data
-  Analyst and Data Engineer, plus the Product Manager), each a LangChain
-  `ChatOpenAI`, `.bind_tools(...)`-ed where relevant. All run on
-  `gpt-4o-mini` except the tool-using Data Analyst, which writes and debugs
-  real scraper code and uses `gpt-4.1` (`CODE_WRITING_MODEL`). All the
-  wording they get lives in `prompts.py`.
-- **`tools/`** &mdash; the real tools. `scraper.py` is the agent-written
-  scraper: `write_scraper_code` (the Data Analyst hands in a complete Python
-  script, statically checked and saved as `data/scrapers/scraper_vN.py`)
-  and `run_scraper` (really runs it in a separate, time-limited process
-  without your API key). `opendata.py` and `preparation.py` are the other
-  real tools; `validation.py` rejects aggregated or half-empty datasets in
-  code; `run_tools.py` adds per-run state on top (which file is "current",
-  the real results each phase's result card shows).
-- **`sandbox/scraper_kit.py`** &mdash; the scraper's only way to the web
-  (see [Agent-written scraper](#agent-written-scraper) below). Kept outside
-  the packages on purpose: the scraper process can import it, but none of
-  the app's own code.
-- **`reporting/transcript.py`** &mdash; once a run ends, renders it to
-  `conversation_history/` as both a Markdown transcript and a
-  self-contained HTML page styled like the live chat.
-- **`data/`** &mdash; where a run's real dataset files land: the scraped or
-  downloaded dataset, the cleaned version, the SQLite database, the
-  fallback dataset if one was needed, and `data/scrapers/` (every scraper
-  version the agent wrote plus each run's request log and output).
-  Git-ignored (regenerated fresh every run).
-- **`tests/`** &mdash; offline tests for the scraper tools
-  (`python -m unittest discover tests`, from this folder).
-- **`conversation_history/`** &mdash; every run's saved Markdown + HTML
-  transcript. Git-ignored.
-
-## Architecture
-
-How the pieces fit together for one run:
+A team of LLM agents takes a business objective ("Build a price prediction model for rental apartments.")
+from free text to a sourced, cleaned, analysed, modelled, evaluated and presented result. The web UI shows
+every step live. Every hand-over passes a **gate**: deterministic checks, then a skeptical critic, then a
+supervisor. Gates can send work back along the process model's feedback edges. A final model is scored
+**once** on a locked holdout that no agent can read. An outer loop (`make improve`) benchmarks the system,
+lets an ImproverAgent change prompts/tools/config, and keeps only changes that improve the score beyond noise.
 
 ```mermaid
 flowchart LR
-    Browser["Browser<br/>static/ (index.html, app.js)"]
-    Server["app/server.py<br/>FastAPI + Server-Sent Events"]
-    DemoRun["app/demo_run.py<br/>DemoRun: steps 1-4, once, in order"]
-    Graph["agents/graph.py<br/>LangGraph StateGraph<br/>(one phase's turn-taking)"]
-    Agents["agents/personas.py<br/>personas &rarr; ChatOpenAI"]
-    Tools["tools/run_tools.py<br/>RunTools: per-run tool state"]
-    DataTool["tools/opendata.py, preparation.py<br/>real tool functions"]
-    Transcript["reporting/transcript.py<br/>Markdown + HTML export"]
-    OpenAI(["OpenAI API"])
-    RealWorld(["Real web<br/>rental sites, opendata.swiss"])
-    SQLite[("data/rental_data.db")]
-    History[("conversation_history/*.md, *.html")]
+  BO[Business objectives] --> DD[Define data] --> CD[Collect data] --> PS[Prepare & store]
+  PS --> EDA[EDA] --> EV[Evaluation]
+  PS --> MO[Modeling] --> EV
+  EV --> PR[Present results]
+  DD -. feedback .-> BO
+  CD -. feedback .-> DD
+  PS -. feedback .-> CD
+  EDA -. feedback .-> PS
+  MO -. feedback .-> PS
+  EV -. feedback .-> EDA
+  EV -. feedback .-> MO
+```
+Solid = forward, dotted = feedback (real conditional LangGraph edges). Every transition is decided by a gate; each
+phase may also retry itself, and any phase may escalate to *Present results* (budget exhausted / no way forward).
 
-    Browser <-->|SSE events| Server
-    Server --> DemoRun
-    DemoRun -->|stream one phase| Graph
-    Graph -->|invoke, .bind_tools| Agents
-    Agents -->|chat completions| OpenAI
-    Graph -->|tool call requested| Tools
-    Tools --> DataTool
-    Tools -->|agent-written code,<br/>separate process| ScraperKit["sandbox/scraper_kit.py<br/>polite_get / save_rows"]
-    ScraperKit -->|robots.txt, allowlist,<br/>delays, stop at 403/429| RealWorld
-    DataTool -->|search / download| RealWorld
-    DataTool -->|clean / store / query| SQLite
-    DemoRun -->|once the run ends| Transcript
-    Transcript --> History
+## Architecture
+
+```
+frontend/  React + Vite + TS · React Flow (live graph) · Recharts · Tailwind
+    │  REST /api/*  +  WebSocket /ws/runs/{id}  (tails the SQLite event log)
+ada/api/server.py        FastAPI
+ada/runner.py            start / resume / stop / approve; SqliteSaver checkpointer (resume after crash)
+ada/graph/
+  topology.py            the process model: nodes, forward + feedback edges, UI layout  (single source of truth)
+  build.py               node wrapper: phase work → checks → critic → gate → supervisor → conditional edge
+  phases.py              per-phase briefs, orchestrator post-processing (holdout lock, validation, MLflow, DuckDB, report)
+  stub.py                scripted fake run (UI demo + tests, no LLM)
+ada/gates/               deterministic checks + gate decision        ┐
+ada/evaluation/          metrics, baselines, prediction harness      │ protected: the improver cannot edit these
+ada/vault.py             locked holdout (hash split, strip, one-time)│
+improve/ benchmarks/     self-improvement loop, scoring, tasks       ┘
+ada/sandbox/             executor (docker | remote | subprocess-as-other-user), kit (ada_kit, sitecustomize guard)
+ada/llm.py ada/budget.py OpenAI Responses API, per-call cost accounting, hard budget limits
+agents/                  agents (prompt file + tool whitelist + Pydantic schema), critic, supervisor
+agents/tools/            tools — editable by the improver
+prompts/*.md             versioned system prompts — editable by the improver
+config.yaml              models, budgets, gates, sandbox … (only models/roles/agents editable by the improver)
 ```
 
-And what `agents/graph.py`'s compiled `StateGraph` actually does for a single
-agent's turn, looped until the phase ends:
+**Agents:** ObjectiveAgent, DataRequirementsAgent, DataCollectorAgent (the only one with network tools),
+DataEngineerAgent, EDAAgent, ModelingAgent, EvaluationAgent, PresenterAgent, plus CriticAgent, Supervisor
+and ImproverAgent. Each has a versioned prompt in `prompts/`, a fixed tool whitelist (`agents/phase_agents.py`)
+and a Pydantic output schema (`ada/schemas.py`). Agents only get compact briefs plus artifact paths, never raw data.
 
-```mermaid
-stateDiagram-v2
-    [*] --> agent_turn
-    agent_turn --> tools: tool call requested
-    agent_turn --> finish_turn: no tool call
-    tools --> tools: chain another tool (max 3 rounds)
-    tools --> record_turn: react to the real result
-    finish_turn --> record_turn
-    record_turn --> agent_turn: still going
-    record_turn --> [*]: turn cap hit, or consensus
+**Gates** (`ada/gates/`): schema validation, row counts, null/duplicate rates, target sanity, leakage scan
+(near-perfect correlation, target-derived names, identifiers, post-hoc columns), train/validation overlap,
+"model must beat the naive baseline" (scored by the orchestrator, not the agent), claim/number consistency,
+provenance + licences. Then the critic scores the work 0–10. Possible results: `pass | retry_same_phase |
+route_back(<allowed node>) | escalate`. After 2 failed retries the same strategy may not be repeated.
+
+**Locked holdout** — enforced by permissions and tool design, not by prompt: see
+[DECISIONS.md](DECISIONS.md#holdout-and-isolation). Tests prove that agents' tools and sandboxed code cannot read it.
+
+**Events:** every action is written to SQLite (`var/ada.db`) and streamed over WebSocket as
+`{run_id, ts, node, agent, type, summary, payload}` with `type ∈ message | tool_call | tool_result | gate |
+transition | artifact | metric | budget | error | improvement`.
+
+## Run it
+
+Requirement: a `.env` with `OPENAI_API_KEY`, either in this folder or in any parent folder. In this repository it
+is in the repository root.
+
+### Docker compose
+
+```bash
+docker compose up --build        # UI http://localhost:8080 · API :8000 · MLflow http://localhost:5000
 ```
 
-## Agent-written scraper
+The sandbox service mounts only the run workspaces, sits on an internal network without internet access, and
+never sees the vault or `.env`.
 
-In Step 3 the Data Analyst writes its own scraper instead of calling a
-ready-made one. It calls `write_scraper_code` with a complete Python
-script, `run_scraper` to really run it, reads the real result (exit code,
-traceback, every request with its HTTP status, rows saved), and fixes the
-code if needed. Every version and every run appear in the chat as they
-happen and are saved in the transcript.
+### Local (no Docker; used for development here)
 
-**The rules are enforced in code, not in the prompt.** The script may only
-import a short whitelist of modules (`scraper_kit`, `bs4`, `json`, `re`,
-`urllib.parse`, ...), and its only way to the web is
-`scraper_kit.polite_get(url)`, which:
+Run every `make` command from this project folder (the Makefile lives here), not from the repository root:
 
-- only fetches `flatfox.ch`, `immoscout24.ch` and `homegate.ch`
-- checks `robots.txt` first (a 401/403 on robots.txt means "disallowed")
-- waits 2&ndash;5 s between requests, at most 15 requests per run
-- stops for good at the first 403, 429 or Cloudflare challenge &mdash; no
-  retries, no workarounds &mdash; and uses an honest User-Agent
+```bash
+cd Agentic_Data_Analytics_Experiment_LangGraph      # or: make -C Agentic_Data_Analytics_Experiment_LangGraph run
+make setup          # .venv + requirements + npm install
+make sandbox-user   # creates OS user 'adasandbox' that executes agent code (needs sudo); chmod 600 your .env
+make run            # builds the UI, serves it + API on http://localhost:8000, MLflow UI on :5000
+make demo           # scripted run without LLM calls (animates the UI)
+make test           # unit tests, no LLM calls
+make improve        # one self-improvement cycle
+make bench          # benchmark suite once
+```
 
-Results go through `scraper_kit.save_rows(...)` into a fixed column schema.
-A run's output only becomes the dataset if it looks like individual
-listings with the key fields (ID, rent, rooms, zip/city) at least 80%
-filled; the Data Engineer then cleans it and stores it in SQLite as usual.
+Other ports: `make run PORT=8001 MLFLOW_PORT=5001`.
 
-**Working memory.** Tool results only exist during the turn that called
-the tool; the shared transcript keeps just each agent's one-sentence
-reaction. So before every turn the tool-using Data Analyst gets private
-notes on its last scraper run (error, real response structure, the code it
-ran). Without them, a fix written on a later turn has to guess again.
+**Stopping**
+- `make run` in a terminal: press `Ctrl+C`. This stops the web app and MLflow.
+- A server running in the background: `kill $(lsof -t -i :8000)` (and `:5000` for MLflow), or `fuser -k 8000/tcp`.
+  Use the same command when `make run` fails with "address already in use".
+- Runs started from the CLI are separate processes and keep going after the server stops. List them with
+  `ps -eo pid,args | grep "[a]da.cli run"` and stop one with `kill <pid>`.
+- A single run, without stopping the app: the **stop** button in the UI. The run finishes its current step and
+  then writes the report with the best result so far.
+- Runs that were running when the server stopped are marked *interrupted*. Continue them with **resume** in the UI
+  or `.venv/bin/python -m ada.cli resume <run_id>`.
 
-**What to expect.** From a server, immoscout24.ch and homegate.ch answer
-403 (bot protection), and the agents say so and move on. flatfox.ch
-publishes a public JSON API (`/api/v1/public-listing/`) that its
-`robots.txt` allows, and that's where live runs have ended up with real
-listings (e.g. 63 Zürich-area rental apartments in one test run). The code
-check and the separate process keep an LLM's code honest in a classroom
-demo; they're not a hard security boundary, so don't expose this app
-publicly. Check each site's terms of use before using its data.
+CLI: `.venv/bin/python -m ada.cli run --objective "…" [--region Zurich] [--offline] [--max-usd 3]`,
+`… run --task diabetes_regression`, `… resume <run_id>`, `… list`.
 
-## Setup
+In the UI, enter an objective and region, set the budget sliders and press **Start run**. Past runs are listed
+underneath; interrupted runs show a **resume** button. The **Self-improvement** tab lists every improver cycle
+with its diff, scores and decision.
 
-1. Install dependencies (from the repo root): `pip install -r requirements.txt`
-2. Create your `.env` file at the **repository root** from the provided
-   template, then fill in your own key:
-   ```console
-   cp .env.example .env    # run from the repo root
-   ```
-   ```
-   OPENAI_API_KEY=sk-...
-   ```
-   `.env` is already excluded via `.gitignore` &mdash; never commit your key.
-3. From this folder, run the server:
-   ```console
-   python main.py
-   ```
-4. Open <http://localhost:8000> in your browser and click **Start
-   conversation**. Click **Stop** at any point to end the run.
+`HUMAN_APPROVAL=true` (or the checkbox) pauses at each gate through a LangGraph interrupt; the UI shows the allowed
+edges as buttons. The default is fully autonomous.
 
-> [!NOTE]
-> A full run makes real outbound HTTP requests, writes real local files
-> (git-ignored), and consumes your OpenAI API credits for its duration —
-> typically a few minutes.
+## Self-improvement
+
+`make improve` = `python -m improve.loop`:
+1. Benchmark `HEAD` in a clean git worktree. The tasks are in `benchmarks/tasks.yaml`: offline diabetes
+   regression, breast-cancer classification, synthetic rentals, and the online rental objective. By default two
+   offline tasks × 2 repeats; configure under `improve:` in `config.yaml`.
+2. Score each run: 0.55 × holdout improvement over the naive baseline on the task's fixed metric + 0.2 × gate pass
+   rate + 0.15 × unused budget share + 0.1 × unused time share.
+3. The ImproverAgent reads the traces and proposes ≤ 3 changes. `improve/allowlist.py` accepts only
+   `prompts/*.md`, `agents/tools/*.py` and the `models`/`roles`/`agents` config keys. Tool edits that mention the
+   vault, holdout, gates, evaluation, environment variables or subprocesses are rejected.
+4. The changes are committed to branch `improve/<id>` in a second worktree. The unit tests run there, then the
+   benchmark runs again.
+5. The change is accepted only if the mean gain exceeds max(0.02, 2 × standard error) and the tests pass. Then
+   it is merged; otherwise the branch is deleted. Everything is appended to `improvements.jsonl`.
+
+## Configuration notes
+
+- Models: `models.strong` / `models.worker` + `roles` in `config.yaml`. No model name is hard-coded.
+- Budgets: `budgets.*`. When a budget runs out, the run jumps to `present_results`. A small reserve is kept so the
+  report can still be written; if the reserve is spent too, a template report is used.
+- Domain rules: `domains.deny` lists hosts that are never contacted (currently immoscout24.ch and homegate.ch, whose
+  terms forbid automated access; each rule also covers all subdomains). The check runs in code before every network
+  tool call, again after redirects, and on web-search results. `domains.prefer` lists operator-cleared sources, which
+  the requirements and collector agents see as leads to check first. Benchmark runs don't get them. The improver can
+  change neither list.
+- Web search: OpenAI's built-in `web_search`; set `web.search_provider: tavily` and `TAVILY_API_KEY` to use Tavily.
+- MLflow: every experiment line an agent logs (`ada_kit.log_experiment`) is mirrored into MLflow by the
+  orchestrator (`var/mlflow.db`), plus the best model with its validation metrics.
+
+See [DECISIONS.md](DECISIONS.md) for the decisions made along the way.
