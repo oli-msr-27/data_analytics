@@ -74,13 +74,13 @@ pip install -r requirements.txt  # installs the required Python libraries
 
 ## Agentic Data Analytics Experiment
 
-[`Agentic_Data_Analytics_Experiment_LangGraph_v2/`](Agentic_Data_Analytics_Experiment_LangGraph_v2/README.md)
+[`Agentic_Data_Analytics_Experiment_LangGraph/`](Agentic_Data_Analytics_Experiment_LangGraph/README.md)
 is an autonomous multi-agent system built with [LangGraph](https://langchain-ai.github.io/langgraph/)
 and OpenAI. It works through the course's full Data Analytics Process Model: business objectives, data
 definition, web data collection, preparation, EDA, modeling, evaluation and presentation. It includes
 gates (checks plus a critic), feedback loops, a locked holdout test set, budgets, and a self-improvement
 loop. A live web UI (FastAPI + WebSocket, React) shows the progress. See its own
-[README](Agentic_Data_Analytics_Experiment_LangGraph_v2/README.md) for setup and details.
+[README](Agentic_Data_Analytics_Experiment_LangGraph/README.md) for setup and details.
 Non-commercial / educational use only.
 
 ## Folder Structure
@@ -95,7 +95,7 @@ Data Analytics/
 ├── .vscode/
 │   └── settings.json
 |
-├── Agentic_Data_Analytics_Experiment_LangGraph_v2/
+├── Agentic_Data_Analytics_Experiment_LangGraph/
 ├── Week_01/
 ├── Week_02/
 ├── Week_03/

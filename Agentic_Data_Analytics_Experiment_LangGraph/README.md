@@ -85,7 +85,7 @@ never sees the vault or `.env`.
 Run every `make` command from this project folder (the Makefile lives here), not from the repository root:
 
 ```bash
-cd Agentic_Data_Analytics_Experiment_LangGraph_v2      # or: make -C Agentic_Data_Analytics_Experiment_LangGraph_v2 run
+cd Agentic_Data_Analytics_Experiment_LangGraph      # or: make -C Agentic_Data_Analytics_Experiment_LangGraph run
 make setup          # .venv + requirements + npm install
 make sandbox-user   # creates OS user 'adasandbox' that executes agent code (needs sudo); chmod 600 your .env
 make run            # builds the UI, serves it + API on http://localhost:8000, MLflow UI on :5000

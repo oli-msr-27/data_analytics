@@ -24,12 +24,12 @@ run: frontend ## backend + UI on :$(PORT), MLflow UI on :$(MLFLOW_PORT)
 	@mkdir -p var
 	@echo "UI: http://localhost:$(PORT)   MLflow: http://localhost:$(MLFLOW_PORT)"
 	@trap 'kill 0' EXIT; \
-	$(VENV)/bin/mlflow ui --backend-store-uri sqlite:///$(CURDIR)/var/mlflow.db --port $(MLFLOW_PORT) > var/mlflow.log 2>&1 & \
-	$(VENV)/bin/uvicorn ada.api.server:app --host 0.0.0.0 --port $(PORT)
+	$(PY) -m mlflow ui --backend-store-uri sqlite:///$(CURDIR)/var/mlflow.db --port $(MLFLOW_PORT) > var/mlflow.log 2>&1 & \
+	$(PY) -m uvicorn ada.api.server:app --host 0.0.0.0 --port $(PORT)
 
 dev: ## backend with reload + Vite dev server on :5173
 	@trap 'kill 0' EXIT; \
-	$(VENV)/bin/uvicorn ada.api.server:app --reload --port $(PORT) & \
+	$(PY) -m uvicorn ada.api.server:app --reload --port $(PORT) & \
 	cd frontend && npm run dev
 
 demo: ## scripted run without LLM calls (animates the UI)
@@ -45,7 +45,7 @@ bench: ## run the benchmark suite once with the current system version
 	$(PY) -m improve.benchmark
 
 mlflow:
-	$(VENV)/bin/mlflow ui --backend-store-uri sqlite:///$(CURDIR)/var/mlflow.db --port $(MLFLOW_PORT)
+	$(PY) -m mlflow ui --backend-store-uri sqlite:///$(CURDIR)/var/mlflow.db --port $(MLFLOW_PORT)
 
 clean-runs: ## delete local run data (not the improvement log)
 	rm -rf var/runs var/*.db var/*.db-* var/mlartifacts
