@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Background, BaseEdge, Controls, type ReactFlowInstance, EdgeLabelRenderer, Handle, Position, ReactFlow, getBezierPath,
+  Background, BaseEdge, type ReactFlowInstance, EdgeLabelRenderer, Handle, Position, ReactFlow, getBezierPath,
   type Edge, type EdgeProps, type Node, type NodeProps,
 } from "@xyflow/react";
 import type { GraphSpec } from "../api";
@@ -85,10 +85,52 @@ function handles(src: { x: number; y: number }, dst: { x: number; y: number }, k
   return { sourceHandle: "ts", targetHandle: "tt" };
 }
 
-export default function ProcessGraph({ spec, view, height = 380 }: { spec: GraphSpec; view: RunView; height?: number }) {
+// node box size (tallest node: two-line label) and outer margin — keep in sync with PhaseNode
+const NODE_W = 176;
+const NODE_H = 92;
+const PAD = 10;
+
+/** Highest point of the same-row feedback arcs (quadratic curves drawn above the nodes in PhaseEdge). */
+function arcTop(spec: GraphSpec): number {
+  const pos = Object.fromEntries(spec.nodes.map((n) => [n.id, n]));
+  let top = Infinity;
+  for (const e of spec.edges) {
+    const s = pos[e.source], t = pos[e.target];
+    if (e.kind !== "feedback" || !s || !t || Math.abs(s.y - t.y) >= 40) continue;
+    const bend = 40 + Math.abs(s.x - t.x) * 0.12;       // same formula as the edge curve
+    top = Math.min(top, Math.min(s.y, t.y) - bend / 2 - 6); // quadratic peak + arrow/label
+  }
+  return top;
+}
+
+export default function ProcessGraph({ spec, view }: { spec: GraphSpec; view: RunView }) {
   const flow = useRef<ReactFlowInstance<Node<PhaseData>, Edge<FlowEdgeData>> | null>(null);
-  // refit so the whole process model stays visible when the panel is resized
-  useEffect(() => { const t = setTimeout(() => flow.current?.fitView({ padding: 0.12 }), 30); return () => clearTimeout(t); }, [height]);
+  const box = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  // bounding box of the whole diagram in flow coordinates
+  const bounds = useMemo(() => {
+    const xs = spec.nodes.map((n) => n.x), ys = spec.nodes.map((n) => n.y);
+    const top = Math.min(Math.min(...ys), arcTop(spec)) - PAD;
+    const bottom = Math.max(...ys) + NODE_H + PAD;
+    return { x: Math.min(...xs) - PAD, y: top, width: Math.max(...xs) + NODE_W - Math.min(...xs) + 2 * PAD,
+             height: bottom - top };
+  }, [spec]);
+  // panel height = exactly what the diagram needs at the current width (never more, never cut off)
+  const height = width ? Math.max(140, Math.round((width * bounds.height) / bounds.width)) : 0;
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el);
+    setWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!height) return;
+    const t = setTimeout(() => flow.current?.fitBounds(bounds, { padding: 0 }), 0);
+    return () => clearTimeout(t);
+  }, [height, bounds]);
+
   const nodes: Node<PhaseData>[] = useMemo(() => spec.nodes.map((n) => ({
     id: n.id, type: "phase", position: { x: n.x, y: n.y }, draggable: false,
     data: { label: n.label, agent: n.agent, status: view.status[n.id] ?? "idle", visits: view.visits[n.id] ?? 0,
@@ -106,12 +148,10 @@ export default function ProcessGraph({ spec, view, height = 380 }: { spec: Graph
   }), [spec, view, pos]);
 
   return (
-    <div className="w-full" style={{ height }}>
-      <ReactFlow onInit={(inst) => { flow.current = inst; }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView
-        fitViewOptions={{ padding: 0.12 }} nodesConnectable={false} elementsSelectable={false}
-        panOnScroll zoomOnScroll={false} zoomOnPinch minZoom={0.3} maxZoom={2.5} proOptions={{ hideAttribution: true }}>
+    <div ref={box} className="w-full" style={{ height: height || 300 }}>
+      <ReactFlow onInit={(inst) => { flow.current = inst; if (height) inst.fitBounds(bounds, { padding: 0 }); }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} nodesConnectable={false} elementsSelectable={false}
+        panOnDrag={false} panOnScroll={false} zoomOnScroll={false} zoomOnPinch={false} zoomOnDoubleClick={false} preventScrolling={false} minZoom={0.1} maxZoom={4} proOptions={{ hideAttribution: true }}>
         <Background gap={24} size={1} />
-        <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
     </div>
   );

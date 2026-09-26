@@ -185,8 +185,10 @@ def _raw_rows(store: RunStore, state: dict) -> int | None:
         if path.suffix == ".parquet":
             return len(pd.read_parquet(path))
         if path.suffix in (".csv", ".tsv", ".txt"):
-            with open(path, "rb") as fh:
-                return max(0, sum(1 for _ in fh) - 1)
+            # parse properly: quoted fields may contain line breaks
+            sep = "\t" if path.suffix == ".tsv" else ","
+            return int(sum(len(chunk) for chunk in pd.read_csv(path, sep=sep, usecols=[0], chunksize=200_000,
+                                                               on_bad_lines="skip", low_memory=False)))
         if path.suffix in (".xlsx", ".xls"):
             return len(pd.read_excel(path))
         if path.suffix == ".json":
@@ -201,9 +203,8 @@ def check_prepare_store(output: dict | None, *, store: RunStore, cfg: Config, st
     from ada.schemas import PrepOutput
     res = [_schema("prep_schema", output, PrepOutput)]
     prep = output or {}
-    if prep.get("needs_more_data"):
-        res.append(fail("data_sufficient", prep.get("needs_more_data_reason") or "engineer requests more data",
-                        route_hint="collect_data"))
+    wants_more = bool(prep.get("needs_more_data"))
+    more_reason = prep.get("needs_more_data_reason") or "engineer requests more data"
     if not store.exists("clean/clean.parquet"):
         res.append(fail("clean_parquet_exists", "clean/clean.parquet missing"))
         return res
@@ -235,6 +236,15 @@ def check_prepare_store(output: dict | None, *, store: RunStore, cfg: Config, st
     if raw_rows and n_total < 0.5 * raw_rows:
         res.append(fail("row_retention", f"clean data keeps {n_total} of {raw_rows} raw rows ({n_total / raw_rows:.0%}) — "
                                          "justify every filter in the data card", severity="warning"))
+    if wants_more:
+        if n_total >= min_rows:
+            # enough rows: missing columns / coverage are preparation or modeling concerns, not a reason to re-collect
+            res.append(fail("data_sufficient", f"engineer asked for more data although {n_total} rows >= {min_rows} are "
+                                               f"available ({more_reason[:300]}); derive what is missing from the data at "
+                                               "hand (e.g. region from coordinates) and document remaining gaps",
+                            severity="warning"))
+        else:
+            res.append(fail("data_sufficient", more_reason, route_hint="collect_data"))
     if n_total >= min_rows:
         res.append(ok("min_rows", f"{n_total} >= {min_rows}"))
     else:

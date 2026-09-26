@@ -167,20 +167,6 @@ export default function App() {
   const { events, status } = useRunEvents(selected);
   const view = useMemo(() => deriveRunView(events), [events]);
   const firstLoad = useRef(true);
-  const [graphHeight, setGraphHeight] = useState<number>(() => {
-    try { return Number(localStorage.getItem("ada.graphHeight")) || 380; } catch { return 380; }
-  });
-  const startDrag = (e: React.PointerEvent) => {
-    e.preventDefault();
-    const y0 = e.clientY, h0 = graphHeight;
-    let h = h0;
-    const move = (ev: PointerEvent) => { h = Math.max(200, Math.min(1200, h0 + ev.clientY - y0)); setGraphHeight(h); };
-    const up = () => {
-      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-      try { localStorage.setItem("ada.graphHeight", String(h)); } catch { /* ignore */ }
-    };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
-  };
 
   const refreshRuns = useCallback(() => api.runs().then((rs) => {
     setRuns(rs);
@@ -221,7 +207,7 @@ export default function App() {
           <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
             {!selected || !spec ? <div className="p-10 text-center text-stone-400">Start a run or pick one from the list.</div> : (
               <>
-                <section className="border-b border-stone-200 bg-white px-4 pt-3 dark:border-stone-800 dark:bg-stone-950">
+                <section className="shrink-0 border-b border-stone-200 bg-white px-4 pt-3 dark:border-stone-800 dark:bg-stone-950">
                   <div className="flex flex-wrap items-center gap-3">
                     <span className={`rounded px-2 py-0.5 text-xs font-semibold text-white ${STATUS_TONE[liveStatus] ?? "bg-stone-400"}`}>{liveStatus || "…"}</span>
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">{run?.objective}{run?.region ? ` — ${run.region}` : ""}</span>
@@ -239,17 +225,12 @@ export default function App() {
                       </div>
                     </div>
                   )}
-                  <ProcessGraph spec={spec} view={view} height={graphHeight} />
-                  <div role="separator" aria-orientation="horizontal" title="drag to resize the process graph"
-                    onPointerDown={startDrag} onDoubleClick={() => setGraphHeight(380)}
-                    className="group -mx-4 flex h-3 cursor-row-resize items-center justify-center hover:bg-stone-100 dark:hover:bg-stone-900">
-                    <div className="h-1 w-12 rounded-full bg-stone-300 group-hover:bg-blue-500 dark:bg-stone-700" />
-                  </div>
+                  <ProcessGraph spec={spec} view={view} />
                   <div className="pb-3"><BudgetMeters view={view} /></div>
                 </section>
-                <section className="grid min-h-[560px] flex-1 grid-cols-1 xl:grid-cols-12">
-                  <div className="h-[640px] border-b border-stone-200 xl:col-span-7 xl:border-b-0 xl:border-r dark:border-stone-800"><Timeline events={events} agents={view.agents} /></div>
-                  <div className="flex min-h-[480px] flex-col xl:col-span-5">
+                <section className="grid min-h-[420px] flex-1 grid-cols-1 xl:min-h-0 xl:grid-cols-12">
+                  <div className="h-[520px] min-h-0 border-b border-stone-200 xl:col-span-7 xl:h-auto xl:border-b-0 xl:border-r dark:border-stone-800"><Timeline events={events} agents={view.agents} /></div>
+                  <div className="flex h-[520px] min-h-0 flex-col xl:col-span-5 xl:h-auto">
                     <div className="flex gap-1 border-b border-stone-200 px-3 py-2 text-xs dark:border-stone-800">
                       {(["metrics", "artifacts"] as const).map((s) => (
                         <button key={s} onClick={() => setSide(s)} className={`rounded-md px-2.5 py-1 ${side === s ? "bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900" : "bg-stone-100 dark:bg-stone-800"}`}>

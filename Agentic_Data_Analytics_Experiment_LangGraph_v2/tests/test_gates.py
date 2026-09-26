@@ -88,3 +88,31 @@ def test_giving_up_without_attempts_forces_collection_retry(tmp_path):
     assert all(c.route_hint is None for c in lazy)       # nothing may send it upstream yet
     tried = check_collect_data(report, store=store, attempts=4)
     assert any(c.name == "data_obtainable" and c.route_hint == "define_data" for c in tried)
+
+
+def test_more_data_request_with_enough_rows_does_not_reroute(tmp_path):
+    from ada.gates.checks import check_prepare_store
+    from ada.store import RunStore
+    store = RunStore("y", root=tmp_path).init()
+    n = 600
+    rng = np.random.default_rng(0)
+    pd.DataFrame({"_row_id": [f"r{i}" for i in range(n)], "rent": rng.normal(2000, 300, n),
+                  "area": rng.normal(70, 10, n), "rooms": rng.integers(1, 6, n)}).to_parquet(store.resolve("clean/clean.parquet"))
+    store.write_text("data_card.md", "card")
+    prep = {"target_column": "rent", "feature_columns": ["area", "rooms"], "row_count": n, "cleaning_steps": ["x"],
+            "needs_more_data": True, "needs_more_data_reason": "no postcode"}
+    st = {"objective_spec": {"task_type": "regression"}, "phase_outputs": {"define_data": {"min_rows": 500}}}
+    checks = check_prepare_store(prep, store=store, cfg=CFG, state=st)
+    assert all(c.route_hint is None for c in checks)
+    assert any(c.name == "data_sufficient" and c.severity == "warning" for c in checks)
+    st["phase_outputs"]["define_data"]["min_rows"] = 5000          # genuinely too few rows -> re-collect
+    checks = check_prepare_store(prep, store=store, cfg=CFG, state=st)
+    assert any(c.route_hint == "collect_data" for c in checks)
+
+
+def test_raw_row_count_handles_multiline_csv(tmp_path):
+    from ada.gates.checks import _raw_rows
+    from ada.store import RunStore
+    store = RunStore("z", root=tmp_path).init()
+    store.write_text("raw/t.csv", 'id,text\n1,"line one\nline two\nline three"\n2,"ok"\n')
+    assert _raw_rows(store, {"phase_outputs": {"collect_data": {"primary_file": "raw/t.csv"}}}) == 2
