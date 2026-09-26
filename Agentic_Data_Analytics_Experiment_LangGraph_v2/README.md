@@ -139,6 +139,11 @@ edges as buttons. The default is fully autonomous.
 - Models: `models.strong` / `models.worker` + `roles` in `config.yaml`. No model name is hard-coded.
 - Budgets: `budgets.*`. When a budget runs out, the run jumps to `present_results`. A small reserve is kept so the
   report can still be written; if the reserve is spent too, a template report is used.
+- Domain rules: `domains.deny` lists hosts that are never contacted (currently immoscout24.ch and homegate.ch, whose
+  terms forbid automated access; each rule also covers all subdomains). The check runs in code before every network
+  tool call, again after redirects, and on web-search results. `domains.prefer` lists operator-cleared sources, which
+  the requirements and collector agents see as leads to check first. Benchmark runs don't get them. The improver can
+  change neither list.
 - Web search: OpenAI's built-in `web_search`; set `web.search_provider: tavily` and `TAVILY_API_KEY` to use Tavily.
 - MLflow: every experiment line an agent logs (`ada_kit.log_experiment`) is mirrored into MLflow by the
   orchestrator (`var/mlflow.db`), plus the best model with its validation metrics.

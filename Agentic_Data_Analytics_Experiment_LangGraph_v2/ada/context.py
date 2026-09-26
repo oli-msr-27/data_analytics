@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +29,18 @@ class RunContext:
     llm_client: Any = None             # injectable for tests
     _llm: LLM | None = None
     _sandbox: Sandbox | None = None
+    _stop_checked_at: float = 0.0
+
+    def should_stop(self) -> bool:
+        """True once a stop was requested — in this process or (via the database) from any other."""
+        if self.stop_requested.is_set():
+            return True
+        now = time.monotonic()
+        if now - self._stop_checked_at >= 2.0:
+            self._stop_checked_at = now
+            if self.events.stop_requested(self.run_id):
+                self.stop_requested.set()
+        return self.stop_requested.is_set()
 
     @property
     def llm(self) -> LLM:

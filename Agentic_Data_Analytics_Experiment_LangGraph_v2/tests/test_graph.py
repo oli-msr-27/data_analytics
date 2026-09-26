@@ -109,3 +109,24 @@ def test_delete_run_removes_everything():
     assert mgr.events.events(run_id) == []
     assert not RunStore(run_id).root.exists() and not (vault_root() / run_id).exists()
     assert not mgr.final_state(run_id)       # checkpoints gone
+
+
+def test_stop_request_reaches_run_in_another_process():
+    """A stop requested through the database (e.g. from the web server) ends a run executing elsewhere."""
+    from ada.events import default_store
+    import threading
+    mgr = RunManager()
+    run_id = "cross-stop-1"
+    t = threading.Thread(target=lambda: mgr.start("stop me", None, {"mode": "stub", "stub_delay": 0.2},
+                                                  background=False, run_id=run_id))
+    t.start()
+    import time
+    time.sleep(1.5)
+    other = RunManager(events=default_store())     # a different manager, like the API server
+    with other._lock:
+        other._contexts.clear()
+    assert other.stop(run_id)
+    t.join(60)
+    run = mgr.events.get_run(run_id)
+    assert run["status"] == "stopped"
+    assert mgr.final_state(run_id)["stop_reason"] == "stopped by user"

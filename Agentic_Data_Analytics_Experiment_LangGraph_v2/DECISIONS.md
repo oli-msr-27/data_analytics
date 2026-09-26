@@ -40,3 +40,18 @@ Decisions made while building the system without asking, with the reason for eac
 - **Validation split is tamper-proof.** `data/splits.json` is recomputed from the hash rule before modeling and before validation, so an agent editing it has no effect.
 - **Sandbox modes:** `docker` (network none, only the workspace mounted), `remote` (the compose `sandbox` service on an internal network with no egress), `subprocess-user` (local, `sudo setpriv` to `adasandbox`, rlimits, `timeout -s KILL`), `subprocess-same-user` (refused unless `sandbox.require_isolation: false`).
 - **Network for data collection** is only available to the DataCollector's tools, which run in the backend process: `web_search`, `fetch_url`, `download_file`, `geocode_addresses`, `osm_poi_counts`. Sandboxed code has no network. In local subprocess mode, the no-network guarantee comes from the audit hook only, because iptables isn't available in this container. Docker and compose modes enforce it at the network level.
+
+## Domain policy
+
+- **`domains.deny` / `domains.prefer` in `config.yaml`**, added at the operator's request. Deny is a compliance guard
+  enforced in code at three points:
+  1. the protected tool dispatcher (`agents/base.py`) refuses any network tool call whose arguments contain a denied
+     URL, before any request is made;
+  2. `_get` / the range reader in `agents/tools/web.py` check again, including the final URL after redirects;
+  3. web-search citations from denied hosts are removed.
+  A rule matches the host and all its subdomains, but not look-alikes such as `nothomegate.ch`.
+- **Protected from the improver:** `domains` is not an editable config key, `ada/domains.py` is outside the editable
+  surface, and the allowlist rejects tool edits that remove a `check_url(` / `denied_rule(` call.
+- **Prefer entries are leads, not data.** They appear in the brief for `define_data` and `collect_data`. The
+  collector still verifies fit, licence and robots.txt. Benchmark runs (`task_id` set) don't get the hints, so the
+  scores keep measuring the agents' own sourcing ability.

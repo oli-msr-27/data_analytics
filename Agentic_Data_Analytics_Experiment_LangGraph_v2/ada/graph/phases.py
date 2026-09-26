@@ -13,6 +13,7 @@ import pandas as pd
 from ada import report, tracking
 from ada.budget import BudgetExceeded
 from ada.context import RunContext
+from ada.domains import preferred
 from ada.evaluation import metrics as M
 from ada.evaluation.harness import HarnessError, validate_model
 from ada.gates.checks import CHECKS, CheckResult, fail, leakage_suspects
@@ -60,6 +61,15 @@ def _brief(ctx: RunContext, state: dict[str, Any], node: str) -> str:
     parts.append("# Workspace files\n" + ("\n".join(files) if files else "(empty)"))
     if ctx.offline:
         parts.append("# Mode\nOFFLINE: no web access. Use only the local dataset catalog.")
+    elif node in ("define_data", "collect_data"):
+        deny = ctx.cfg.get("domains.deny", []) or []
+        if deny:
+            parts.append("# Domain policy (enforced)\nNever access these domains (terms forbid automated access): "
+                         + ", ".join(deny))
+        leads = preferred(ctx.cfg)
+        if leads and not (state.get("options") or {}).get("task_id"):
+            parts.append("# Operator-cleared sources — check these first (still verify fit, licence, robots.txt)\n"
+                         + "\n".join(f"- {p['url']}" + (f" — {p['note']}" if p["note"] else "") for p in leads))
     visit = (state.get("visits") or {}).get(node, 1)
     parts.append(f"(This is visit {visit} of this phase.)")
     return "\n\n".join(parts)

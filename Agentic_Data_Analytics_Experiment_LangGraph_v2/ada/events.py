@@ -68,6 +68,8 @@ class EventStore:
             cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(runs)")}
             if "owner_pid" not in cols:
                 self._conn.execute("ALTER TABLE runs ADD COLUMN owner_pid INTEGER")
+            if "stop_requested" not in cols:
+                self._conn.execute("ALTER TABLE runs ADD COLUMN stop_requested INTEGER DEFAULT 0")
             self._conn.commit()
 
     # -- runs ------------------------------------------------------------
@@ -94,6 +96,7 @@ class EventStore:
         if status == "running":
             sets.append("owner_pid=?")
             args.append(os.getpid())
+            sets.append("stop_requested=0")
         args.append(run_id)
         with self._lock:
             self._conn.execute(f"UPDATE runs SET {', '.join(sets)} WHERE id=?", args)
@@ -108,6 +111,17 @@ class EventStore:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [_run_row(r) for r in rows]
+
+    def request_stop(self, run_id: str) -> None:
+        """Cross-process stop signal: the process executing the run polls this flag."""
+        with self._lock:
+            self._conn.execute("UPDATE runs SET stop_requested=1 WHERE id=?", (run_id,))
+            self._conn.commit()
+
+    def stop_requested(self, run_id: str) -> bool:
+        with self._lock:
+            row = self._conn.execute("SELECT stop_requested FROM runs WHERE id=?", (run_id,)).fetchone()
+        return bool(row and row["stop_requested"])
 
     def delete_run(self, run_id: str) -> None:
         with self._lock:

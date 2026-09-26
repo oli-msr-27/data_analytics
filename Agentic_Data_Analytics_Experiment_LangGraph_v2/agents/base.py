@@ -94,7 +94,7 @@ class Agent:
         outputs: list[dict[str, Any]] = []        # our function_call_output dicts (for truncation)
         nudges = 0
         for step in range(steps):
-            if self.ctx.stop_requested.is_set():
+            if self.ctx.should_stop():
                 raise RunStopped("stop requested")
             last = step == steps - 1
             choice: Any = {"type": "function", "name": "submit_result"} if last else "auto"
@@ -146,6 +146,15 @@ class Agent:
             args_obj = tool.params.model_validate_json(arguments or "{}")
         except ValidationError as exc:
             return f"error: invalid arguments: {exc}"[:2000]
+        if tool.network:
+            from ada.domains import DomainDenied, check_url, urls_in
+            try:
+                for url in urls_in(args_obj.model_dump()):
+                    check_url(self.ctx.cfg, url)
+            except DomainDenied as exc:
+                self.emit("tool_result", f"{name}: refused by domain policy — {exc}",
+                          {"tool": name, "ok": False, "policy": "domain_deny"})
+                return f"error: {exc}"
         shown = args_obj.model_dump()
         if "code" in shown:
             shown["code"] = shown["code"][:6000]

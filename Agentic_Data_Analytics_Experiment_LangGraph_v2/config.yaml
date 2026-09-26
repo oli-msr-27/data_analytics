@@ -93,6 +93,19 @@ web:
   overpass_url: https://overpass-api.de/api/interpreter
   max_geocode_rows: 400
 
+# Domain rules (protected; enforced in code for every network tool, including after redirects).
+# deny:   never contacted — a rule covers the host and all its subdomains.
+# prefer: operator-cleared sources, offered to the data agents as leads (not used in benchmark runs).
+domains:
+  deny:
+    - immoscout24.ch     # terms of use forbid automated access
+    - homegate.ch        # terms of use forbid automated access
+  prefer:
+    - url: https://flatfox.ch/api/v1/public-listing/
+      note: flatfox public listing API (JSON, paginate with limit/offset; robots.txt allows the API)
+    - url: https://github.com/Unco3892/SRED_2022/releases/download/v1.0/SRED_data.zip
+      note: SRED Swiss Real Estate Dataset (CC BY 4.0) — listing tables under metadata/; use list_remote_zip + download_zip_member
+
 human_approval: false            # env HUMAN_APPROVAL=true overrides
 
 paths:

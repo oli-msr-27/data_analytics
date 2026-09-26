@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, wsUrl, type GraphSpec, type Run, type RunEvent } from "./api";
 import { deriveRunView } from "./runView";
 import ProcessGraph from "./components/ProcessGraph";
@@ -38,6 +38,27 @@ function useRunEvents(runId: string | null) {
   return { events, status };
 }
 
+/** Textarea whose height always fits its full content (also when the sidebar width changes). */
+function AutoTextarea({ value, onChange, className }: { value: string; onChange: (v: string) => void; className: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  }, []);
+  useLayoutEffect(fit, [value, fit]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => { if (el.clientWidth !== width) { width = el.clientWidth; fit(); } });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fit]);
+  return <textarea ref={ref} rows={2} value={value} onChange={(e) => onChange(e.target.value)} className={className} />;
+}
+
 function remembered(key: string, fallback: string): string {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 }
@@ -74,8 +95,8 @@ function StartPanel({ onStarted, defaults }: { onStarted: (id: string) => void; 
   return (
     <div className="space-y-3">
       <label className="block text-xs font-medium">Business objective
-        <textarea value={objective} onChange={(e) => setObjective(e.target.value)} rows={3}
-          className="mt-1 w-full rounded-md border border-stone-300 bg-white p-2 text-sm dark:border-stone-700 dark:bg-stone-900" />
+        <AutoTextarea value={objective} onChange={setObjective}
+          className="mt-1 w-full resize-none overflow-hidden rounded-md border border-stone-300 bg-white p-2 text-sm dark:border-stone-700 dark:bg-stone-900" />
       </label>
       <label className="block text-xs font-medium">Region / target market
         <input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="empty = agents decide based on data availability"
@@ -115,6 +136,10 @@ function RunList({ runs, selected, onSelect, onResume, onDelete }: {
               {r.summary?.budget?.usd != null && <span>${Number(r.summary.budget.usd).toFixed(2)}</span>}
               {["interrupted", "failed"].includes(r.status) && !r.active && (
                 <span role="button" onClick={(e) => { e.stopPropagation(); onResume(r.id); }} className="ml-auto rounded bg-orange-600 px-1.5 text-white">resume</span>
+              )}
+              {(r.active || r.status === "running") && (
+                <span title="this run is still running — stop it first (stop button next to its status), then delete it"
+                  className="ml-auto cursor-not-allowed px-1 text-stone-300 dark:text-stone-700">🗑</span>
               )}
               {!r.active && r.status !== "running" && (
                 <span role="button" title="delete this run" aria-label="delete run"

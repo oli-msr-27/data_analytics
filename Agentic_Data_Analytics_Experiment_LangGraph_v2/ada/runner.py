@@ -112,13 +112,17 @@ class RunManager:
         return self.resume(run_id, resume_value={"next_node": next_node, "note": note})
 
     def stop(self, run_id: str) -> bool:
+        """Works for runs in this process and for runs executing elsewhere (e.g. started from the CLI)."""
+        run = self.events.get_run(run_id)
+        if run is None or run["status"] not in ("running", "queued"):
+            return False
+        self.events.request_stop(run_id)
         with self._lock:
             ctx = self._contexts.get(run_id)
-        if ctx is None:
-            return False
-        ctx.stop_requested.set()
-        ctx.emit("message", "stop requested — finishing the current step, then presenting results",
-                 agent="orchestrator")
+        if ctx is not None:
+            ctx.stop_requested.set()
+        self.events.emit(run_id, "message", "stop requested — finishing the current step, then presenting results",
+                         agent="orchestrator")
         return True
 
     def delete(self, run_id: str) -> None:

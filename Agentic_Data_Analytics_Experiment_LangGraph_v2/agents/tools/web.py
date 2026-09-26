@@ -20,6 +20,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from agents.tools.registry import ToolContext, tool
+from ada.domains import check_url, denied_rule
 from ada.store import sha256_file
 
 _robots_cache: dict[str, RobotFileParser | None] = {}
@@ -66,6 +67,7 @@ def _throttle(tc: ToolContext, url: str) -> None:
 def _get(tc: ToolContext, url: str, *, stream: bool = False) -> httpx.Response:
     if not url.startswith(("http://", "https://")):
         raise ValueError("only http(s) URLs are allowed")
+    check_url(tc.ctx.cfg, url)
     if not _robots_allowed(tc, url):
         raise PermissionError(f"robots.txt disallows fetching {url}")
     _throttle(tc, url)
@@ -73,6 +75,11 @@ def _get(tc: ToolContext, url: str, *, stream: bool = False) -> httpx.Response:
                           follow_redirects=True)
     req = client.build_request("GET", url)
     resp = client.send(req, stream=stream)
+    try:
+        check_url(tc.ctx.cfg, str(resp.url))          # a redirect must not lead to a denied host
+    except PermissionError:
+        resp.close()
+        raise
     final = str(resp.url).lower()
     if resp.status_code in (401, 402, 403) or any(h in urlparse(final).path for h in LOGIN_HINTS) and final != url.lower():
         resp.close()
@@ -88,7 +95,14 @@ class SearchArgs(BaseModel):
 
 @tool("web_search", "Search the web. Returns an answer with cited source URLs.", SearchArgs, network=True)
 def web_search(tc: ToolContext, a: SearchArgs) -> Any:
-    return tc.ctx.llm.web_search(a.query, agent=tc.agent, node=tc.node)
+    result = tc.ctx.llm.web_search(a.query, agent=tc.agent, node=tc.node)
+    kept = [src for src in result.get("sources", []) if not denied_rule(tc.ctx.cfg, src["url"])]
+    removed = len(result.get("sources", [])) - len(kept)
+    result["sources"] = kept
+    if removed:
+        result["note"] = (f"{removed} cited source(s) on the domain deny list were removed; "
+                          f"never use: {', '.join(tc.ctx.cfg.get('domains.deny', []))}")
+    return result
 
 
 class FetchArgs(BaseModel):
@@ -182,8 +196,10 @@ class _RangeReader(io.RawIOBase):
     def __init__(self, tc: ToolContext, url: str):
         self.client = httpx.Client(headers={"User-Agent": _ua(tc)}, timeout=httpx.Timeout(120, connect=15),
                                    follow_redirects=True)
+        check_url(tc.ctx.cfg, url)
         head = self.client.head(url)
         head.raise_for_status()
+        check_url(tc.ctx.cfg, str(head.url))
         if head.headers.get("accept-ranges") != "bytes":
             raise ValueError("server does not support range requests — download the whole file instead")
         self.url, self.size, self.pos = str(head.url), int(head.headers["content-length"]), 0

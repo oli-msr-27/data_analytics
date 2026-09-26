@@ -63,7 +63,7 @@ def make_node(node: str, ctx: RunContext, phase_fn: PhaseFn) -> Callable[[RunSta
         # ---- stop / budget: go straight to present_results ------------------------------
         stop_reason = state.get("stop_reason")
         if node != END_NODE and not stop_reason:
-            if ctx.stop_requested.is_set():
+            if ctx.should_stop():
                 stop_reason = "stopped by user"
             else:
                 stop_reason = ctx.budget.exhausted_reason()

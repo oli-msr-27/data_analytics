@@ -67,6 +67,9 @@ def check_tool_change(path: str, old_text: str, new_text: str) -> None:
         ast.parse(new_text)
     except SyntaxError as exc:
         raise ChangeRejected(f"{path}: syntax error: {exc}") from exc
+    for guard in ("check_url(", "denied_rule("):
+        if old_text.count(guard) > new_text.count(guard):
+            raise ChangeRejected(f"{path}: removing the domain-policy check {guard!r} is not allowed")
     old_lines = set(old_text.splitlines())
     added = "\n".join(line for line in new_text.splitlines() if line not in old_lines)
     lowered = added.lower()
